@@ -6,7 +6,6 @@
 #include <fstream>
 #include <sstream>
 #include <string>
-#include <map>
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
@@ -18,57 +17,15 @@ struct Vertex {
 
 struct Face {
     unsigned int v1, v2, v3;
-    std::string material;
-};
-
-struct Material {
-    float ambient[3];
-    float diffuse[3];
-    float specular[3];
-    float shininess;
 };
 
 std::vector<Vertex> vertices;
 std::vector<Face> faces;
-std::map<std::string, Material> materials;
+std::vector<std::string> transformations;
 
 std::string getDirectoryPath(const std::string& filepath) {
     size_t pos = filepath.find_last_of("/\\");
     return (pos == std::string::npos) ? "" : filepath.substr(0, pos + 1);
-}
-
-bool loadMTL(const std::string& filename) {
-    std::ifstream file(filename);
-    if (!file.is_open()) {
-        std::cerr << "Falha ao abrir arquivo: " << filename << std::endl;
-        return false;
-    }
-
-    std::string line;
-    std::string currentMaterial;
-    while (std::getline(file, line)) {
-        std::istringstream iss(line);
-        std::string prefix;
-        iss >> prefix;
-
-        if (prefix == "newmtl") {
-            iss >> currentMaterial;
-            materials[currentMaterial] = Material();
-        }
-        else if (prefix == "Ka") {
-            iss >> materials[currentMaterial].ambient[0] >> materials[currentMaterial].ambient[1] >> materials[currentMaterial].ambient[2];
-        }
-        else if (prefix == "Kd") {
-            iss >> materials[currentMaterial].diffuse[0] >> materials[currentMaterial].diffuse[1] >> materials[currentMaterial].diffuse[2];
-        }
-        else if (prefix == "Ks") {
-            iss >> materials[currentMaterial].specular[0] >> materials[currentMaterial].specular[1] >> materials[currentMaterial].specular[2];
-        }
-        else if (prefix == "Ns") {
-            iss >> materials[currentMaterial].shininess;
-        }
-    }
-    return true;
 }
 
 bool loadOBJ(const std::string& filename) {
@@ -79,9 +36,6 @@ bool loadOBJ(const std::string& filename) {
     }
 
     std::string line;
-    std::string currentMaterial;
-    std::string directoryPath = getDirectoryPath(filename);
-
     while (std::getline(file, line)) {
         std::istringstream iss(line);
         std::string prefix;
@@ -95,24 +49,119 @@ bool loadOBJ(const std::string& filename) {
         else if (prefix == "f") {
             Face face;
             char slash;
-            iss >> face.v1 >> slash >> face.v2 >> slash >> face.v3;
-            // OBJ format uses 1-based indexing
+            std::string vertex1, vertex2, vertex3;
+
+            iss >> vertex1 >> vertex2 >> vertex3;
+
+            sscanf_s(vertex1.c_str(), "%u/%*d/%*d", &face.v1);
+            sscanf_s(vertex2.c_str(), "%u/%*d/%*d", &face.v2);
+            sscanf_s(vertex3.c_str(), "%u/%*d/%*d", &face.v3);
+
             face.v1--; face.v2--; face.v3--;
-            face.material = currentMaterial;
+
+            if (face.v1 < 0 || face.v1 >= vertices.size() ||
+                face.v2 < 0 || face.v2 >= vertices.size() ||
+                face.v3 < 0 || face.v3 >= vertices.size()) {
+                std::cerr << "Índice de vértice fora dos limites em: " << line << std::endl;
+                continue;
+            }
+
             faces.push_back(face);
         }
-        else if (prefix == "usemtl") {
-            iss >> currentMaterial;
-        }
-        else if (prefix == "mtllib") {
-            std::string mtlFile;
-            iss >> mtlFile;
-            if (!loadMTL(directoryPath + mtlFile)) {
-                return false;
-            }
+        else if (prefix == "s" || prefix == "t" || prefix == "x" ||
+            prefix == "y" || prefix == "z" || prefix == "c" || prefix == "e") {
+            transformations.push_back(line);
         }
     }
+
+    std::cout << "Total de vértices carregados: " << vertices.size() << std::endl;
+    std::cout << "Total de faces carregadas: " << faces.size() << std::endl;
     return true;
+}
+
+void drawAxes() {
+    float axisLength = 50.0f; // Aumenta o comprimento dos eixos
+    glLineWidth(2.0f);
+    glBegin(GL_LINES);
+
+    // Eixo X (Verde)
+    glColor3f(0.0f, 1.0f, 0.0f);
+    glVertex3f(0.0f, 0.0f, 0.0f);
+    glVertex3f(axisLength, 0.0f, 0.0f);
+
+    // Eixo Y (Azul)
+    glColor3f(0.0f, 0.0f, 1.0f);
+    glVertex3f(0.0f, 0.0f, 0.0f);
+    glVertex3f(0.0f, axisLength, 0.0f);
+
+    // Eixo Z (Vermelho)
+    glColor3f(1.0f, 0.0f, 0.0f);
+    glVertex3f(0.0f, 0.0f, 0.0f);
+    glVertex3f(0.0f, 0.0f, axisLength);
+
+    glEnd();
+}
+
+enum DisplayMode { WIREFRAME, FILLED };
+DisplayMode mode = WIREFRAME;
+
+bool lightEnabled = false;
+
+unsigned int currentTransformation = 0;
+bool showOriginal = true;
+
+void toggleLight() {
+    if (lightEnabled) {
+        glDisable(GL_LIGHTING);
+        glDisable(GL_LIGHT0);
+    }
+    else {
+        glEnable(GL_LIGHTING);
+        glEnable(GL_LIGHT0);
+
+        GLfloat light_position[] = { 1.0f, 1.0f, 1.0f, 1.0f };
+        GLfloat light_diffuse[] = { 1.0f, 1.0f, 1.0f, 1.0f };
+        GLfloat light_specular[] = { 1.0f, 1.0f, 1.0f, 1.0f };
+
+        glLightfv(GL_LIGHT0, GL_POSITION, light_position);
+        glLightfv(GL_LIGHT0, GL_DIFFUSE, light_diffuse);
+        glLightfv(GL_LIGHT0, GL_SPECULAR, light_specular);
+    }
+    lightEnabled = !lightEnabled;
+}
+
+void applyTransformations() {
+    for (unsigned int i = 0; i <= currentTransformation; ++i) {
+        std::istringstream iss(transformations[i]);
+        std::string type;
+        iss >> type;
+
+        if (type == "s") {
+            float sx, sy, sz;
+            iss >> sx >> sy >> sz;
+            glScalef(sx, sy, sz);
+        }
+        else if (type == "t") {
+            float tx, ty, tz;
+            iss >> tx >> ty >> tz;
+            glTranslatef(tx, ty, tz);
+        }
+        else if (type == "x") {
+            float angle;
+            iss >> angle;
+            glRotatef(angle, 1.0f, 0.0f, 0.0f);
+        }
+        else if (type == "y") {
+            float angle;
+            iss >> angle;
+            glRotatef(angle, 0.0f, 1.0f, 0.0f);
+        }
+        else if (type == "z") {
+            float angle;
+            iss >> angle;
+            glRotatef(angle, 0.0f, 0.0f, 1.0f);
+        }
+    }
 }
 
 void key_callback(GLFWwindow* window, int key, int scancode, int action, int mods) {
@@ -122,27 +171,93 @@ void key_callback(GLFWwindow* window, int key, int scancode, int action, int mod
         case GLFW_KEY_Q:
             glfwSetWindowShouldClose(window, true);
             break;
+        case GLFW_KEY_P:
+            if (mode == WIREFRAME)
+                mode = FILLED;
+            else
+                mode = WIREFRAME;
+            break;
+        case GLFW_KEY_L:
+            toggleLight();
+            break;
+        case GLFW_KEY_SPACE:
+            if (currentTransformation < transformations.size() - 1) {
+                ++currentTransformation;
+            }
+            else {
+                currentTransformation = 0;
+                showOriginal = !showOriginal;
+            }
+            break;
         }
     }
 }
 
-void applyMaterial(const Material& material) {
-    glMaterialfv(GL_FRONT, GL_AMBIENT, material.ambient);
-    glMaterialfv(GL_FRONT, GL_DIFFUSE, material.diffuse);
-    glMaterialfv(GL_FRONT, GL_SPECULAR, material.specular);
-    glMaterialf(GL_FRONT, GL_SHININESS, material.shininess);
+void framebuffer_size_callback(GLFWwindow* window, int width, int height) {
+    glViewport(0, 0, width, height);
+    glMatrixMode(GL_PROJECTION);
+    glLoadIdentity();
+    gluPerspective(45.0, (double)width / height, 0.1, 100.0);
 }
 
 void drawMesh() {
-    for (const Face& face : faces) {
-        const Material& material = materials[face.material];
-        applyMaterial(material);
+    if (mode == WIREFRAME) {
+        glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+        glColor3f(0.0f, 0.0f, 0.0f); // Cor das arestas
+    }
+    else {
+        glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+        glColor3f(0.0f, 0.0f, 1.0f); // Cor de preenchimento
+    }
 
-        glBegin(GL_TRIANGLES);
+    glBegin(GL_TRIANGLES);
+    for (const Face& face : faces) {
         glVertex3f(vertices[face.v1].x, vertices[face.v1].y, vertices[face.v1].z);
         glVertex3f(vertices[face.v2].x, vertices[face.v2].y, vertices[face.v2].z);
         glVertex3f(vertices[face.v3].x, vertices[face.v3].y, vertices[face.v3].z);
-        glEnd();
+    }
+    glEnd();
+}
+
+void drawTransformedMesh() {
+    for (unsigned int i = 0; i <= currentTransformation; ++i) {
+        glPushMatrix();
+
+        for (unsigned int j = 0; j < i; ++j) {
+            std::istringstream iss(transformations[j]);
+            std::string type;
+            iss >> type;
+
+            if (type == "s") {
+                float sx, sy, sz;
+                iss >> sx >> sy >> sz;
+                glScalef(sx, sy, sz);
+            }
+            else if (type == "t") {
+                float tx, ty, tz;
+                iss >> tx >> ty >> tz;
+                glTranslatef(tx, ty, tz);
+            }
+            else if (type == "x") {
+                float angle;
+                iss >> angle;
+                glRotatef(angle, 1.0f, 0.0f, 0.0f);
+            }
+            else if (type == "y") {
+                float angle;
+                iss >> angle;
+                glRotatef(angle, 0.0f, 1.0f, 0.0f);
+            }
+            else if (type == "z") {
+                float angle;
+                iss >> angle;
+                glRotatef(angle, 0.0f, 0.0f, 1.0f);
+            }
+        }
+
+        drawMesh();
+
+        glPopMatrix();
     }
 }
 
@@ -184,6 +299,9 @@ int main(int argc, char** argv)
     /* Registra o callback do teclado */
     glfwSetKeyCallback(window, key_callback);
 
+    /* Registra o callback de redimensionamento */
+    glfwSetFramebufferSizeCallback(window, framebuffer_size_callback);
+
     /* Habilita teste de profundidade */
     glEnable(GL_DEPTH_TEST);
 
@@ -201,12 +319,20 @@ int main(int argc, char** argv)
         /* Configura a matriz de visualização */
         glMatrixMode(GL_MODELVIEW);
         glLoadIdentity();
-        gluLookAt(1.0, 1.0, 3.0,  // Posição da câmera
+        gluLookAt(3.0, 3.0, 5.0,  // Posição da câmera
             0.0, 0.0, 0.0,  // Ponto que a câmera está olhando
             0.0, 1.0, 0.0); // Vetor "up"
 
-        // Desenha a malha
-        drawMesh();
+        // Desenha os eixos
+        drawAxes();
+
+        // Aplica transformações e desenha malha transformada
+        if (!showOriginal) {
+            drawTransformedMesh();
+        }
+        else {
+            drawMesh();
+        }
 
         /* Swap front and back buffers */
         glfwSwapBuffers(window);
